@@ -11,7 +11,6 @@ on:
 
 jobs:
   build:
-    name: Build Pages
     runs-on: ubuntu-latest
     permissions:
       pages: write        # to deploy to Pages
