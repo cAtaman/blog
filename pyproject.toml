@@ -9,6 +9,7 @@ readme = "README.md"
 python = "^3.12"
 sphinx = "^7.2.6"
 sphinx-rtd-theme = "^2.0.0"
+sphinx-autobuild = "^2024.2.4"
 
 
 [tool.poetry.group.dev.dependencies]
