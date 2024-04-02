@@ -1,0 +1,57 @@
+name: Build
+
+on:
+  # Triggers the workflow on push or pull request events but only for the "main" branch
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Pages
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write        # to deploy to Pages
+      id-token: write     # to verify the deployment originates from an appropriate source
+    environment:
+      name: github-pages  # Deploy to the github-pages environment
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout Code Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5.0.0
+        with:
+          python-version: 3.12
+
+      - name: Install Dependencies
+        run: |
+          pip install poetry
+          poetry install
+          poetry run make html
+
+      - name: Upload Pages Artifact
+        id: upload
+        uses: actions/upload-pages-artifact
+        with:
+          path: build
+
+  deploy:
+    needs: build
+    # Grant GITHUB_TOKEN the permissions required to make a Pages deployment
+    permissions:
+      pages: write      # to deploy to Pages
+      id-token: write   # to verify the deployment originates from an appropriate source
+    # Deploy to the github-pages environment
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
