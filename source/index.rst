@@ -7,9 +7,11 @@ Welcome to Ataman's Blog's documentation!
 =========================================
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 5
    :caption: Contents:
+   :numbered:
 
+   dev_workflows
 
 
 Indices and tables

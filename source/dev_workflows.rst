@@ -1,3 +1,7 @@
+.. toctree::
+   :maxdepth: 5
+
+
 ==============================================================================
 Streamlining Developer Workflows: Enhancing Collaboration in a Shared Codebase
 ==============================================================================
