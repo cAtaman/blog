@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "blog-dev-workflows"
+name = "blog"
 version = "0.1.0"
 description = "Central location for all my blog posts"
 authors = ["cAtaman <chimaataman@gmail.com>"]
