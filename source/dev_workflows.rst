@@ -72,8 +72,10 @@ Feel free to share your thoughts or any specific areas you would like to explore
 
 
 .. _references:
+
 References
 ----------
+
  1. `Pro Git Book <https://git-scm.com/book/en/v2/Getting-Started-About-Version-Control>`_
  2. `Git Flow <https://nvie.com/posts/a-successful-git-branching-model/>`_
  3. `Branching Patterns <https://martinfowler.com/articles/branching-patterns.html>`_
