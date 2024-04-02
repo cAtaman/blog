@@ -7,7 +7,6 @@ Welcome to Ataman's Blog's documentation!
 =========================================
 
 .. toctree::
-   :maxdepth: 5
    :caption: Contents:
    :numbered:
 
