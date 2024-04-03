@@ -1,9 +1,9 @@
 .. toctree::
 
 
-==============================================================================
-Streamlining Developer Workflows: Enhancing Collaboration in a Shared Codebase
-==============================================================================
+=====================================================================
+Streamlining Developer Workflows: A case study on Deployment Previews
+=====================================================================
 
 
 Introduction
@@ -46,18 +46,72 @@ How We Solved This at Cowrywise
 -------------------------------
 The choice of a developer workflow depends on the specific needs and dynamics of the development team and the nature of the projects undertaken. At Cowrywise, we have adopted the **Feature Branch Workflow** as our primary development process, tailoring our approach to the unique requirements of our team and projects. We also implemented several strategies to optimize this workflows within our teams. Here are some key approaches we adopted:
 
-
-Implementing Deployment Previews for Validation
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Testing and validating changes before integrating them into the main codebase are essential to ensure the stability and functionality of the application. We have implemented deploy previews for feature branches which is activated when needed. As developers work on new features in their respective branches, the changes are automatically deployed to a staging environment, allowing developers and stakeholders to preview and interact with the new features in a production-like setting. This approach enables thorough testing, validation, and feedback collection, contributing to greater confidence in the quality and functionality of the changes before they are merged into the main codebase.
-
-This is especially useful when changes affects more than one team; for example, while the backend team works on a feature that affects the mobile, the mobile team would have a preview URL for use. Also the mobile team can build test applications with this to enable manual testing by non-technical persons.
-
 Leveraging Feature Flags for Flexibility
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Introducing new features into a shared codebase environment can be a complex process, particularly when it comes to managing feature rollouts, conducting A/B testing, and enabling or disabling features based on user feedback. Feature flags, also known as feature toggles, provide a powerful mechanism to address these challenges. At Cowrywise, we have integrated feature flags into our codebase to grant us the flexibility to enable or disable specific features independent of code deployment.
 
 This capability has proven invaluable in orchestrating gradual feature rollouts, conducting A/B testing, and seamlessly controlling feature access for different user segments. With feature flags, we can release new functionality to a subset of users, gather feedback, and make informed decisions about feature activation and refinement. Furthermore, feature flags offer a mechanism for instant rollback by simply toggling off a feature flag, providing us with a safety net in case of unexpected issues following a feature rollout.
+
+Implementing Deployment Previews for Validation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+This was the game-changer for us and I'll be expanding on this in the next section.
+
+Testing and validating changes before integrating them into the main codebase are essential to ensure the stability and functionality of the application. We have implemented deploy previews for feature branches which is activated when needed. As developers work on new features in their respective branches, the changes are automatically deployed to a staging environment, allowing developers and stakeholders to preview and interact with the new features in a production-like setting. This approach enables thorough testing, validation, and feedback collection, contributing to greater confidence in the quality and functionality of the changes before they are merged into the main codebase.
+
+This is especially useful when changes affects more than one team; for example, while the backend team works on a feature that affects the mobile, the mobile team would have a preview URL for use. Also the mobile team can build test applications with this to enable manual testing by non-technical persons.
+
+
+Deployment Previews: Our Implementation Journey
+-----------------------------------------------
+So, at this point, we knew what we needed -- a way to get a deployment of feature branches that mirrors our staging environment. Making this happen however was quite the journey. Being fans of controlling our entire deployment stack, using completely external solutions was not high on our list.
+
+First Draft
+^^^^^^^^^^^
+The first draft for this made use of Docker images, Github Actions, a dedicated EC2 box and tunneling tools like `localtunnel <https://github.com/localtunnel/localtunnel>`_ and `ngrok <https://ngrok.com/use-cases/ingress-for-dev-test-environments>`_.
+
+First, on GitHub, we created a custom label ``branch-deploy``, then we created a GitHub Actions workflow that would be triggered when a pull request (or PR) with this label is opened or updated. When a feature branch is ready, we open a PR for it to the main development branch (develop). If a deployment preview is needed for the feature we attach the ``branch-deploy`` label to the PR.
+
+After the normal Continuous Integration (CI) tests (also a GitHub Actions workflow) runs and passes, the CI job calls the branch-deploy workflow using the  ``workflow_call`` trigger. You can read more about that on the `GitHub doc <https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#workflow_call>`_.
+
+The branch-deploy workflow logs into the provisioned EC2 server and does a few simple things:
+
+ #. Builds a Docker image using the codebase's Dockerfile.
+ #. Deploys the image using `Docker Compose <https://docs.docker.com/compose/>`_.
+ #. Creates a secure web tunnel from this server to the internet using either localtunnel or ngrok.
+
+There were a few problems with this approach.
+
+First, and most annoyingly, the deployments have no state as the databases was destroyed and recreated on each deployment (or each push to the deployed branch).
+
+Second, the tunneling tools in use were not perfect; localtunnel (free infamously becomes unreachable at random while for ngrok, we were limited to a single tunnel link on the free plan. We had no intentions of paying for this service.
+
+
+Second Draft
+^^^^^^^^^^^^
+We made some updates to the first draft to fix a few pain points.
+
+We created a volume for the database containers on deployments. This volume was namespaced to the head branch of the PR that created it. This way, all updates to the PR and even new PRs on that branch would make use of this volume. Data for the feature would be persisted. This worked perfectly.
+
+As for tunneling tools, we started testing out alternatives. We tried hosting our own `localtunnel <https://github.com/localtunnel/localtunnel>`_ instance (it's an open-source project) however we ran into some blockers there and were unwilling to allocated precious developer hours to fix a seemingly unmaintained project. Then we checked for alternative tools and found `serveo.net <https://serveo.net/>`_. Also, for good measure, we had all these services in active use. Our deployment job was set up to try each on in succession in this order: localtunnel, serveo, ngrok till one succeeds.
+Also, both serveo.net and localtunnel allowed setting up a dedicated subdomain for deployments so we set that up. This meant each update would get the same deployment URL. (On ngrok this is a paid feature so we didn't bother with it).
+This worked well enough for a while.
+
+Now all of this was starting to feel really good but it didn't last.
+
+The tunneling services still had issues at times. localtunnel, after a successful deployment would just sometimes refuse connections. serveo would sometimes just not work, which meant a lot of fallbacks to ngrok and thus a lot of changes to deployment URLs. This was a real frustration to the mobile and web teams.
+
+Then localtunnel and serveo.net came with an understandable but frustrating-for-us security feature where each unique user connecting to the tunnel URL had to be verified. They would redirect the requester to a web page where they are to enter the host IP address. This was to make sure the users know they were connecting to a tunneled link. But we were using this with APIs and that was unacceptable to us.
+
+Also, the single EC2 box would sometimes run out of resources and there was a cap to the number of deployments we could make. This was mostly due to the task server we have bundled with the app. We had a few task worker instances for processing asynchronous requests.
+
+
+Radical Third Draft (Final form)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+We had the second draft running for little while as, again, developer hours was not in abundance.
+
+Then an opportunity presented itself. We had just setup a `Docker Swarm <https://docs.docker.com/engine/swarm/>`_ cluster with multiple compute nodes. We updated our branch-deploy workflow to deploy the feature branches as stacks in the swarm cluster. We also reduced the number of task workers. This way, our resource problem was solved.
+
+Then to solve our tunneling issue, we finally went fully internal. We made use of `Traefik <https://doc.traefik.io/traefik/>`_, an open source edge router to route requests from the internet, through an internal tunneling subdomain ``"*.tunnels..."`` to the deployed Docker Swarm stack. This was not as easy or as straight-forward as it sounds.
 
 
 In a nutshell
