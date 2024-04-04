@@ -71,13 +71,15 @@ The first draft for this made use of Docker images, Github Actions, a dedicated 
 
 First, on GitHub, we created a custom label ``branch-deploy``, then we created a GitHub Actions workflow that would be triggered when a pull request (or PR) with this label is opened or updated. When a feature branch is ready, we open a PR for it to the main development branch (develop). If a deployment preview is needed for the feature we attach the ``branch-deploy`` label to the PR.
 
-After the normal Continuous Integration (CI) tests (also a GitHub Actions workflow) runs and passes, the CI job calls the branch-deploy workflow using the  ``workflow_call`` trigger. You can read more about that on the `GitHub doc <https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#workflow_call>`_.
+After the normal Continuous Integration (CI) tests (also a GitHub Actions workflow) runs and passes, the CI job calls the branch-deploy workflow using the  ``workflow_call`` trigger. You can read more about that on the `GitHub Actions doc <https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#workflow_call>`_.
 
 The branch-deploy workflow logs into the provisioned EC2 server and does a few simple things:
 
  #. Builds a Docker image using the codebase's Dockerfile.
  #. Deploys the image using `Docker Compose <https://docs.docker.com/compose/>`_.
  #. Creates a secure web tunnel from this server to the internet using either localtunnel or ngrok.
+
+Also, when the PR is merged or closed, the deployment would be brought down.
 
 There were a few problems with this approach.
 
@@ -109,9 +111,101 @@ Radical Third Draft (Final form)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 We had the second draft running for little while as, again, developer hours was not in abundance.
 
-Then an opportunity presented itself. We had just setup a `Docker Swarm <https://docs.docker.com/engine/swarm/>`_ cluster with multiple compute nodes. We updated our branch-deploy workflow to deploy the feature branches as stacks in the swarm cluster. We also reduced the number of task workers. This way, our resource problem was solved.
+Then an opportunity presented itself. We had just setup a `Docker Swarm <https://docs.docker.com/engine/swarm/>`_ cluster with multiple compute nodes. We updated our branch-deploy workflow to deploy the feature branches as stacks in the swarm cluster using a template `compose file <https://docs.docker.com/engine/swarm/stack-deploy/>`_. We also reduced the number of task workers. This way, our resource problem was solved.
 
-Then to solve our tunneling issue, we finally went fully internal. We made use of `Traefik <https://doc.traefik.io/traefik/>`_, an open source edge router to route requests from the internet, through an internal tunneling subdomain ``"*.tunnels..."`` to the deployed Docker Swarm stack. This was not as easy or as straight-forward as it sounds.
+Then to solve our tunneling issue, we finally went fully internal. We made use of `Traefik <https://doc.traefik.io/traefik/>`_, an open source edge router to route requests from the internet, through an internal tunneling subdomain ``"*.tunnels..."`` to the deployed Docker Swarm stack.
+
+The whole route now looked like this:
+
+Internet (``"<subdomain>.tunnels..."``) -> AWS Load balancers -> Traefik -> Docker Swarm network -> App container
+
+The cleanup routine was also improved upon, where the stack would be removed along with all images when the pull request is merged or closed.
+
+When an update comes to the feature branch PR and the CI passes, the branch-deploy workflow would get triggered. This workflow would build the docker image and then deploy it on the Swarm cluster using a compose file generated from a template.
+
+A stripped version of this template is shown below:
+
+.. code-block:: yaml
+   :linenos:
+   :caption: docker-compose-tmpl.swarm.yml
+   :name: compose-tmpl
+
+    version: '3.8'
+    volumes:
+      example_pr_{{ref_under}}_data: {}
+
+    services:
+      example_pr_{{ref_under}}_staging:
+        image: ghcr.io/org/example/app-build:{{ref}}
+        environment:
+            PR_DEPLOY: 'true'
+        depends_on:
+          - example_pr_{{ref_under}}_db
+
+        networks:
+          - swarm-ingress-overlay
+          - example-pr-{{ref_under}}-network
+
+        deploy:
+          restart_policy:
+            condition: on-failure
+            delay: 2s
+            window: 30s
+          labels:
+            - "traefik.http.routers.example_pr_{{ref_under}}_staging.rule=Host(`{{subdomain}}.tunnels.example.com`)"
+            - "traefik.http.routers.example_pr_{{ref_under}}_staging.entrypoints=web"
+            - "traefik.http.services.example_pr_{{ref_under}}_staging.loadbalancer.server.port=8000"
+            - "traefik.enable=true"
+            - "traefik.docker.lbswarm=true"
+
+      example_pr_{{ref_under}}_db:
+        image: mysql
+        volumes:
+          - ./staging_dump.sql.gz:/docker-entrypoint-initdb.d/staging_dump.sql.gz
+          - example_pr_{{ref_under}}_data:/var/lib/mysql
+        networks:
+          - example-pr-{{ref_under}}-network
+        deploy:
+          restart_policy:
+            condition: on-failure
+            delay: 2s
+            max_attempts: 5
+            window: 30s
+
+    networks:
+      swarm-ingress-overlay:
+        external: true
+      example-pr-{{ref_under}}-network:
+
+
+Explaining the template
+~~~~~~~~~~~~~~~~~~~~~~~
+
+* A copy of this template would be made in the deployment workflow and the placeholders -- text in curly braces -- would be replaced by actual values unique to the PR. This is easily accomplished using tools like `sed <https://linuxhandbook.com/sed-command-basics/>`_, `tr <https://linuxhandbook.com/tr-command/?ref=itsfoss.com>`_ and `cut <https://linuxhandbook.com/cut-command/>`_. This filled copy is what gets deployed to the swarm cluster.
+
+  A short demonstration of this:
+
+  .. code-block:: bash
+
+    REF=$(echo ${{ github.event.client_payload.ref }} | tr -c '[:alnum:]\n\r' '-' | tr '[:upper:]' '[:lower:]' | sed 's/refs-pull-/pr-/')
+    REF_UNDER=$(echo ${{ github.event.client_payload.ref }} | tr -c '[:alnum:]\n\r' '_' | tr '[:upper:]' '[:lower:]' | sed 's/refs_pull_/pr_/')
+    SUBDOMAIN=$(echo cws-${{ github.event.client_payload.branch }} | tr -c '[:alnum:]\n\r' '-' | tr '[:upper:]' '[:lower:]' | cut -c1-60)
+    COMPOSE_FILE="path/to/docker-compose-${REF_UNDER}.swarm.yml"
+
+    # ======= use sed to prepare Compose file
+    cp coreapp/pr/docker-compose.swarm.yml $COMPOSE_FILE
+    sed -i -e "s/{{ref_under}}/$REF_UNDER/g" $COMPOSE_FILE
+    sed -i -e "s/{{ref}}/$REF/g" $COMPOSE_FILE
+    sed -i -e "s/{{subdomain}}/SUBDOMAIN/g" $COMPOSE_FILE
+
+
+* The variables defined with the format: ``${{ <variable> }}`` are gotten from the `GitHub Actions contexts <https://docs.github.com/en/actions/learn-github-actions/contexts>`_.
+
+* The ``labels`` on lines 22-27 of the :ref:`compose file <compose-tmpl>` are what Traefik uses in determine how and where to route requests. See more `here <https://doc.traefik.io/traefik/master/providers/swarm/#routing-configuration>`_.
+
+* For the database volumes on lines 35-37, the first volume is for feeding an initialization SQL script. ``staging_dump.sql.gz`` is a recent dump of the database in the staging environment. The second volume is the one used for persisting data between deployments.
+
+* For the networks (lines 50-53), ``swarm-ingress-overlay`` is the network configured for use by Traefik to route internet requests. This network is attached to all services that needs to be reachable from the internet.
 
 
 In a nutshell
@@ -133,3 +227,7 @@ References
  1. `Pro Git Book <https://git-scm.com/book/en/v2/Getting-Started-About-Version-Control>`_
  2. `Git Flow <https://nvie.com/posts/a-successful-git-branching-model/>`_
  3. `Branching Patterns <https://martinfowler.com/articles/branching-patterns.html>`_
+ 4. `GitHub Actions Docs <https://docs.github.com/en/actions/using-workflows>`_
+ 5. `Traefik Docs <https://doc.traefik.io/traefik/>`_
+ 6. `Docker Swarm Docs <https://docs.docker.com/engine/swarm/>`_
+ 7. `Linux Handbook <https://linuxhandbook.com/>`_

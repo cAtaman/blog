@@ -8,7 +8,7 @@ Welcome to Ataman's Blog's documentation!
 
 .. toctree::
    :caption: Contents:
-   :numbered:
+   :numbered: 3
 
    dev_workflows
 
