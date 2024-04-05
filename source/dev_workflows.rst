@@ -193,7 +193,6 @@ Explaining the template
     COMPOSE_FILE="path/to/docker-compose-${REF_UNDER}.swarm.yml"
 
     # ======= use sed to prepare Compose file
-    cp coreapp/pr/docker-compose.swarm.yml $COMPOSE_FILE
     sed -i -e "s/{{ref_under}}/$REF_UNDER/g" $COMPOSE_FILE
     sed -i -e "s/{{ref}}/$REF/g" $COMPOSE_FILE
     sed -i -e "s/{{subdomain}}/SUBDOMAIN/g" $COMPOSE_FILE
