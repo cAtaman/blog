@@ -202,9 +202,9 @@ Explaining the template
 
 * The ``labels`` on lines 22-27 of the :ref:`compose file <compose-tmpl>` are what Traefik uses in determine how and where to route requests. See more `here <https://doc.traefik.io/traefik/master/providers/swarm/#routing-configuration>`_.
 
-* For the database volumes on lines 35-37, the first volume is for feeding an initialization SQL script. This is used to setup the database on first deployment and populate with data. ``staging_dump.sql.gz`` is a recent dump of the database in the staging environment. The second volume is the one used for persisting data between deployments.
+* For the database volumes on lines 31-33, the first volume is for feeding an initialization SQL script. This is used to setup the database on first deployment and populate with data. ``staging_dump.sql.gz`` is a recent dump of the database in the staging environment. The second volume is the one used for persisting data between deployments.
 
-* For the networks (lines 50-53), ``swarm-ingress-overlay`` is the network configured for use by Traefik to route internet requests. This network is attached to all services that needs to be reachable from the internet.
+* For the networks (lines 43-46), ``swarm-ingress-overlay`` is the network configured for use by Traefik to route internet requests. This network is attached to all services that needs to be reachable from the internet.
 
 
 In a nutshell
