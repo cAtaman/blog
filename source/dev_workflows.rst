@@ -195,7 +195,7 @@ Explaining the template
     # ======= use sed to prepare Compose file
     sed -i -e "s/{{ref_under}}/$REF_UNDER/g" $COMPOSE_FILE
     sed -i -e "s/{{ref}}/$REF/g" $COMPOSE_FILE
-    sed -i -e "s/{{subdomain}}/SUBDOMAIN/g" $COMPOSE_FILE
+    sed -i -e "s/{{subdomain}}/$SUBDOMAIN/g" $COMPOSE_FILE
 
 
 * The variables defined with the format: ``${{ <variable> }}`` are gotten from the `GitHub Actions contexts <https://docs.github.com/en/actions/learn-github-actions/contexts>`_.
