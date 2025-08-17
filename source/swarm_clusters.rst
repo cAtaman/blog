@@ -1,5 +1,5 @@
-Building Auto-Scaling Docker Swarm Clusters on AWS
-==================================================
+From Chaos to Harmony: Orchestrating Docker Swarms with Auto Scaling
+====================================================================
 
 **Authors:** Chima Ataman, Abdulrahman Solanke
 
