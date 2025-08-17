@@ -11,6 +11,7 @@ Welcome to Ataman's Blog's documentation!
    :numbered: 3
 
    dev_workflows
+   swarm_clusters
 
 
 Indices and tables
