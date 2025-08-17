@@ -1,7 +1,8 @@
-From Chaos to Harmony: Orchestrating Docker Swarms with Auto Scaling
-====================================================================
+From Buzz to Balance: Docker Swarm Orchestration Without Tears
+==============================================================
 
-**Authors:** Chima Ataman, Abdulrahman Solanke
+*When swarms grow, we make sure they don’t sting or bring tears.*
+
 
 Introduction
 ------------
