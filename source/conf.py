@@ -7,7 +7,7 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
 project = "Ataman's Blog"
-copyright = "2024, Chima Ataman"
+copyright = "2024 - 2025, Chima Ataman"
 author = "Chima Ataman"
 release = "1.0.0"
 
