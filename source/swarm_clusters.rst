@@ -1,9 +1,9 @@
 .. toctree::
 
 
-=============================================================
-From Buzz to Balance: Docker Swarm Orchestration Without Tears
-=============================================================
+============================================================================
+From Buzz to Balance: Docker Swarm Orchestration Without Tears (Raw Version)
+============================================================================
 
 
 Something Isn't Right Here
