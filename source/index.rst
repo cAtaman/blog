@@ -12,6 +12,7 @@ Welcome to Ataman's Blog's documentation!
 
    dev_workflows
    swarm_clusters
+   swarm_clusters_redacted
 
 
 Indices and tables
