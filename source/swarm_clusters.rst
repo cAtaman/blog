@@ -8,22 +8,21 @@ From Buzz to Balance: Docker Swarm Orchestration Without Tears
 
 Something Isn't Right Here
 --------------------------
-You know the feeling. You SSH into a production server at 11pm because a deploy failed, and you're greeted by a process you didn't start, on a box you didn't provision, running a version of the code you're not sure anyone intended to ship. You fix it. You go to bed. You do it again next Thursday.
+You know the feeling. You SSH into a production server at 11pm because a deployment failed, and you're greeted by a process you didn't start, on a box you didn't provision, running a version of the code you're not sure anyone intended to ship. You fix it. You go to bed. You do it again next Thursday.
 
-That was us. Not in some dramatic, everything-is-on-fire way -- more like a slow accumulation of workarounds that had quietly become the system. We had infrastructure that *worked*, technically. But it didn't work the way infrastructure should: predictably, boringly, without someone's personal knowledge of which server does what.
+That was us. Not in some dramatic, everything-is-on-fire way. More like a slow accumulation of workarounds that had quietly become the system. We had infrastructure that *worked*, technically. But it didn't work the way infrastructure should: predictably, boringly, without someone's personal knowledge of which server does what.
 
-This is the story of how we moved from that to something we actually trust. Not by chasing the shiniest orchestration tool on the market, but by picking the one that fit -- Docker Swarm -- and building the automation around it that made the difference.
+This is the story of how we moved from that to something we actually trust. Not by chasing the shiniest orchestration tool on the market, but by picking the one that fit: Docker Swarm, and building the automation around it that made the difference.
 
 
 Three Deployment Models Walk Into a VPC
 ----------------------------------------
 Our old setup was less "architecture" and more "archaeology." Over the years, we'd accumulated three distinct ways of deploying services, each born from a different era of the platform's growth.
 
-**Model 1: Raw code on bare servers.** The core API -- our oldest and largest service -- ran as raw Python on dedicated EC2 instances. Django behind uWSGI behind Nginx, deployed by SSHing in and running a script like this on each app server:
+**Model 1: Raw code on bare servers.** The core API, our oldest and largest service, ran as raw Python on dedicated EC2 instances. Django behind uWSGI behind Nginx, deployed via GitHub Actions that would SSH into each app server and run a script like this:
 
 .. code-block:: bash
 
-    # The "deployment pipeline" for the core API app server
     cd /opt/projects/app
     git checkout master -f && git pull
     git submodule update --init --remote
@@ -33,11 +32,11 @@ Our old setup was less "architecture" and more "archaeology." Over the years, we
 
 Three app servers behind an ELB, one task server running RabbitMQ and Celery workers managed by Supervisor (same git-pull ritual, but ending with ``supervisorctl restart all``). Capacity changes meant provisioning a new instance by hand.
 
-**Model 2: Standalone Docker containers.** Newer microservices ran as Docker containers on a single host -- Traefik in front, ``docker-compose up -d`` to deploy. No orchestration, no health checks beyond what Traefik provided, no resource limits.
+**Model 2: Standalone Docker containers.** Newer microservices ran as Docker containers on a single host: Traefik in front, ``docker-compose up -d`` to deploy. No orchestration, no health checks beyond what Traefik provided, no resource limits.
 
-**Model 3: The accidental Swarm cluster.** Our SOA server started as a Docker Compose host and gradually became an ad-hoc Swarm cluster as we bolted on more services -- less organised colony, more bees in a shoebox. Staging and production workloads shared the same nodes. A misbehaving staging service could -- and occasionally did -- starve a production one.
+**Model 3: The accidental Swarm cluster.** Our SOA server started as a Docker Compose host and gradually became an ad-hoc Swarm cluster as we bolted on more services. Less organized colony, more bees in a shoebox. Staging and production workloads shared the same nodes. A misbehaving staging service could, and occasionally did, starve a production one.
 
-All of this ran on **public subnets**. Some instances had public IPv4 addresses. We were spending roughly $2,500 a year on public IPs alone, and every microservice node needed an Elastic IP for payment provider whitelisting. Observability was split across a self-hosted Elasticsearch cluster for logs, an Elastic Cloud instance for APM and traces, plus a separate Prometheus and Grafana stack for infrastructure metrics. Coverage was inconsistent. Incidents on the SOA cluster were routinely discovered through customer reports, not alerts.
+All of this ran on **public subnets**. Some instances had public IPv4 addresses. When AWS started charging for public IPv4 addresses in 2024, we were suddenly spending roughly $2,500 a year on public IPs alone, and every microservice node needed an Elastic IP for payment provider whitelisting. Observability was split across a self-hosted Elasticsearch cluster for logs, an Elastic Cloud instance for APM and traces, plus a separate Prometheus and Grafana stack for infrastructure metrics. Coverage was inconsistent. Incidents on the SOA cluster were routinely discovered through customer reports, not alerts.
 
 It worked. Until it didn't scale. Not in the "we need 10x throughput" sense, but in the "we can't onboard another service without someone getting paged" sense.
 
@@ -53,10 +52,6 @@ A Swarm compose file *is* a Docker Compose file with a ``deploy`` key. There's n
 .. code-block:: yaml
 
     deploy:
-      replicas: 2
-      placement:
-        preferences:
-          - spread: node.labels.aws_az
       update_config:
         parallelism: 1
         order: start-first
@@ -64,28 +59,20 @@ A Swarm compose file *is* a Docker Compose file with a ``deploy`` key. There's n
         monitor: 30s
       rollback_config:
         failure_action: pause
-        parallelism: 1
         order: stop-first
-      restart_policy:
-        condition: on-failure
-        delay: 2s
-        window: 30s
-      resources:
-        limits:
-          memory: 164M
 
-``start-first`` gives us zero-downtime rolling updates. ``spread: node.labels.aws_az`` distributes replicas across availability zones. ``failure_action: rollback`` with a 30-second ``monitor`` window means a bad deploy automatically rolls back — and if the rollback itself fails, it pauses so a human can investigate instead of looping. Could Kubernetes do more? Absolutely. Do we need more? Not today.
+``start-first`` gives us zero-downtime rolling updates. ``failure_action: rollback`` with a 30-second ``monitor`` window means a bad deploy automatically rolls back, and if the rollback itself fails, it pauses so a human can investigate instead of looping. You'll see the full picture, with placement, resource limits, and networking, in a complete Compose file later. Could Kubernetes do more? Absolutely. Do we need more? Not today.
 
-We're not ideological about this. If we outgrow Swarm, we'll migrate. But "you might need Kubernetes someday" is not a reason to adopt it now -- not when the operational tax is real and the benefits are theoretical for our workload.
+We're not ideological about this. The obvious risk is that Docker has largely stopped investing in Swarm; the project receives minimal updates. But for our purposes, that's a feature, not a bug. Swarm is stable *because* it's done. We'd rather run a finished tool than babysit a moving target. If we outgrow it, we'll migrate. But "you might need Kubernetes someday" is not a reason to adopt it now. Not when the operational tax is real and the benefits are theoretical for our workload.
 
 
 Rewiring the Foundation
 -----------------------
-The migration wasn't a big bang. It was a series of deliberate changes across networking, compute, deployment, and observability -- each one load-bearing enough that we couldn't afford to rush.
+The migration wasn't a big bang. It was a series of deliberate changes across networking, compute, deployment, and observability, each one load-bearing enough that we couldn't afford to rush.
 
-**Private subnets, finally.** We moved all compute off public subnets and into private ones (``10.0.6.0/24`` through ``10.0.8.0/24``). Services that don't need internet exposure are no longer reachable from the internet, full stop. NAT Gateways handle outbound traffic -- one per availability zone in HA mode, giving us three static egress IPs by default. For payment providers that require a single whitelisted IP, we route traffic through a dedicated subnet with its own NAT Gateway. Either way, the per-node Elastic IP juggling is gone.
+**Private subnets, finally.** We moved all compute off public subnets and into private ones (one ``/24`` CIDR block per availability zone). Services that don't need internet exposure are no longer reachable from the internet, full stop. NAT Gateways handle outbound traffic, one per availability zone in HA mode, giving us three static egress IPs by default. For payment providers that require a single whitelisted IP, we route traffic through a dedicated subnet with its own NAT Gateway. Either way, the per-node Elastic IP juggling is gone.
 
-**Ephemeral nodes, not pets.** Every named, lovingly-maintained EC2 instance was replaced by ASG-managed nodes built from a single base AMI (Debian 12, Docker pre-installed). Two ASGs per cluster: one for managers, one for workers. This separation means scale-in events can never accidentally destroy Swarm quorum. Instance refreshes use ``MinHealthyPercentage: 110``, so a replacement node is always launched before the old one is terminated — the cluster never dips below its current count, and Raft quorum is never at risk. A termination lifecycle hook runs ``drain_node.sh`` to gracefully evacuate tasks before a node disappears, rather than letting the Swarm discover the absence on its own.
+**Ephemeral nodes, not pets.** Every named, lovingly-maintained EC2 instance was replaced by ASG-managed nodes built from a single base AMI (Debian 12, Docker pre-installed). Two ASGs per cluster are configured: one for managers, one for workers. In practice, we currently run all nodes as managers, but the separation is there for when we need to scale worker-only nodes independently. Either way, the ASG split means scale-in events can never accidentally destroy Swarm quorum. Instance refreshes use ``MinHealthyPercentage: 110``, so a replacement node is always launched before the old one is terminated. The cluster never dips below its current count, and Raft quorum is never at risk. A termination lifecycle hook runs ``drain_node.sh`` to gracefully evacuate tasks before a node disappears, rather than letting the Swarm discover the absence on its own.
 
 The real magic is in the node lifecycle. When an ASG launches or replaces an instance, AWS CodeDeploy runs four lifecycle hooks defined in ``appspec.yml``:
 
@@ -105,9 +92,9 @@ The real magic is in the node lifecycle. When an ASG launches or replaces an ins
         - location: clusters/sidecars_init.sh
           timeout: 300
 
-The first two hooks handle draining and cleanup. The interesting work is in ``swarm_node_init.sh``: it pulls Swarm join tokens from AWS Secrets Manager, validates which manager IPs are actually reachable, and either joins the existing cluster or initialises a new one. It labels the node with its availability zone, syncs the updated manager IP list back to Secrets Manager, and logs into ECR. Finally, ``sidecars_init.sh`` deploys shared infrastructure services -- but only on the first manager to join the cluster. Subsequent nodes don't need to run it: Swarm automatically schedules global services onto any new node, and replicated services already have their desired replica count filled.
+The first two hooks handle draining and cleanup. The interesting work is in ``swarm_node_init.sh``: it pulls Swarm join tokens from AWS Secrets Manager, validates which manager IPs are actually reachable, and either joins the existing cluster or initializes a new one if this is the first manager. It labels the node with its availability zone, syncs the updated manager IP list back to Secrets Manager, and logs into ECR. Finally, ``sidecars_init.sh`` deploys shared infrastructure services, but only on the first manager to join the cluster. Subsequent nodes don't need to run it: Swarm automatically schedules global services onto any new node, and replicated services already have their desired replica count filled.
 
-**One deployment model.** The three old approaches collapsed into a single pattern: ``docker stack deploy`` triggered by GitHub Actions through a reusable workflow called ``cd.stack.yml``. The workflow SSHes into a validated manager node, pulls the compose file and secrets, runs an optional ``prepare.sh`` for migrations or pre-deploy setup, and deploys. (``prepare.sh`` is not the same as the ``start.sh`` scripts sidecars use during node init — it's fetched from the repo at deploy time and only runs during deployments.)
+**One deployment model.** The three old approaches collapsed into a single pattern: ``docker stack deploy`` triggered by GitHub Actions through a reusable workflow called ``cd.stack.yml``. The workflow SSHes into a validated manager node, pulls the compose file and secrets, runs an optional ``prepare.sh`` for migrations or pre-deploy setup, and deploys.
 
 .. code-block:: bash
 
@@ -124,7 +111,7 @@ Day-to-day, a deployment looks like this: a developer pushes to the relevant bra
 
 .. code-block:: bash
 
-    # Manager selection — first reachable manager wins
+    # Manager selection: first reachable manager wins
     for IP in $MANAGER_IPS; do
         if [[ -z $(timeout 3 bash -c "echo > /dev/tcp/$IP/2377" 2>&1) ]]; then
             MANAGER_IP="$IP"
@@ -154,7 +141,7 @@ Once a manager is selected, the workflow SSHes in and runs ``docker stack deploy
 
 Slack gets notified. A GitHub deployment record is created. The developer never SSHes into anything.
 
-Here's what a production service definition actually looks like -- a real Compose file from one of our clusters:
+Here's what a production service definition actually looks like. A real Compose file from one of our clusters:
 
 .. code-block:: yaml
 
@@ -187,7 +174,7 @@ Here's what a production service definition actually looks like -- a real Compos
             - "traefik.docker.lbswarm=true"
           resources:
             limits:
-              memory: 164M
+              memory: 512M
         logging:
           driver: fluentd
           options:
@@ -196,28 +183,32 @@ Here's what a production service definition actually looks like -- a real Compos
 
 Every service connects to ``swarm-ingress-overlay`` for Traefik routing and gets a per-stack internal network for service-to-service communication. Resource limits are enforced. Replicas spread across AZs.
 
-Logging goes through Fluent Bit (via the ``fluentd`` driver) to New Relic. Note ``fluentd-async: "true"`` — it matters more than it looks. Without it, the driver blocks synchronously: if Fluent Bit goes down, your containers can't write to stdout and will hang. One flag is the difference between "we lost some logs" and "logging took down production."
+Logging goes through Fluent Bit (via the ``fluentd`` driver) to New Relic. Note ``fluentd-async: "true"``, because it matters more than it looks. Without it, the driver blocks synchronously: if Fluent Bit goes down, your containers can't write to stdout and will hang. One flag is the difference between "we lost some logs" and "logging took down production."
 
-The shared sidecars -- seven of them, deployed automatically via ``sidecars_init.sh`` -- handle everything the application services shouldn't have to think about:
+The shared sidecars, seven of them, deployed once by ``sidecars_init.sh`` when the first manager joins and then distributed by Swarm's own scheduling, handle everything the application services shouldn't have to think about:
 
 - **Traefik** (replicated) creates the ``swarm-ingress-overlay`` network and handles ingress, routing based on deploy labels
 - **Fluent Bit** (global) forwards container logs to New Relic, with config pulled from S3
-- **OpenTelemetry Collector** (replicated) handles distributed tracing over a dedicated ``telemetry`` network
+- **OpenTelemetry Collector** (replicated) collects application service metrics over a dedicated ``telemetry`` network
 - **cAdvisor** (global) collects Docker service and container metrics and sends them to Prometheus
 - **cred-sync** (replicated, single instance) periodically refreshes ECR login credentials cluster-wide (custom-built)
 - **Portainer Edge Agent** (global) connects each node to a central Portainer server for cluster management
 - **cleanup** (global) prunes old Docker images to prevent disk pressure
 
-Observability went from four fragmented systems (self-hosted Elasticsearch for logs, Elastic Cloud for APM and traces, a separate Prometheus/Grafana stack for infrastructure metrics, and MetricBeat for application metrics) to a cleaner split across three purpose-built layers. **New Relic** handles APM, host metrics, and container-level visibility — the infrastructure agent is installed on every node during ``swarm_node_init.sh``, and each service integrates APM by wrapping its entrypoint with the New Relic agent in its Dockerfile:
+Observability went from four fragmented systems (self-hosted Elasticsearch for logs, Elastic Cloud for APM and traces, a separate Prometheus/Grafana stack for infrastructure metrics, and MetricBeat for application metrics) to two primary layers.
+
+**New Relic** handles APM, infrastructure metrics, host metrics, and container-level visibility. The infrastructure agent is installed on every node during ``swarm_node_init.sh``, and each service integrates APM by wrapping its entrypoint with the New Relic agent in its Dockerfile:
 
 .. code-block:: dockerfile
 
     # newrelic package installed via requirements.txt / pyproject.toml
     CMD ["newrelic-admin", "run-program", "uvicorn", "app:application", "--host", "0.0.0.0"]
 
-**Prometheus and Grafana** handle infrastructure metrics. Node Exporters are baked into the base AMI with their port exposed, so Prometheus discovers and scrapes every node automatically. cAdvisor feeds Docker service and container metrics into the same Prometheus instance. **Percona Monitoring and Management** owns the database layer — host metrics, query analytics, replication stats — kept separate from application observability so database issues don't get lost in application noise.
+In early 2026, we moved infrastructure metrics to New Relic as well. Node Exporters are still baked into the base AMI and cAdvisor still feeds Prometheus, but New Relic's infrastructure agent now handles what we used to rely on Prometheus and Grafana for. The old stack is still running as a deliberate fallback, but it's no longer what we reach for during an incident.
 
-Secrets live in AWS Secrets Manager, fetched at deploy time -- never stored on disk, never committed to the repo. Each cluster has a ``cluster_info.json`` that points to its Secrets Manager resource, S3 config bucket, and Traefik subdomain marker.
+**Percona Monitoring and Management** owns the database layer (host metrics, query analytics, replication stats), kept separate from application observability so database issues don't get lost in application noise.
+
+Secrets live in AWS Secrets Manager, fetched at deploy time, never stored on disk, never committed to the repo. Each cluster has a ``cluster_info.json`` that points to its Secrets Manager resource, S3 config bucket, and Traefik subdomain marker.
 
 
 What We Learned the Hard Way
@@ -228,11 +219,11 @@ Off-the-shelf solutions exist, but the logic is simple enough that we chose to b
 
 The same principle applies to Fluent Bit, cAdvisor, and the image cleanup service. Invest in the boring infrastructure that keeps the cluster healthy, not just the application services that run on it.
 
-**Security improvements often pay for themselves.** Moving to private subnets wasn't just a security win -- it eliminated $2,500/year in public IPv4 costs and removed the operational overhead of managing per-node Elastic IPs for payment provider whitelisting. When someone tells you "we can't afford to fix the security posture," run the numbers. You might find it's the insecure setup that's expensive.
+**Security improvements often pay for themselves.** Moving to private subnets wasn't just a security win, it eliminated $2,500/year in public IPv4 costs and removed the operational overhead of managing per-node Elastic IPs for payment provider whitelisting. When someone tells you "we can't afford to fix the security posture," run the numbers. You might find it's the insecure setup that's expensive.
 
-**The deployment model matters more than the orchestrator.** Swarm versus Kubernetes is a fun argument at conferences. In practice, the thing that transformed our operations wasn't the choice of orchestrator -- it was going from three inconsistent deployment models to one. A single ``cd.stack.yml`` workflow, a single compose file convention, a single set of sidecars. Consistency compounds.
+**Consistency matters more than the orchestrator debate.** Docker Swarm versus Kubernetes is a fun argument at conferences. In practice, the thing that transformed our operations was going from three inconsistent deployment models to one. Swarm made that easy because the tooling was already familiar, but the real win was the consistency itself: a single ``cd.stack.yml`` workflow, a single compose file convention, a single set of sidecars. Consistency compounds.
 
-**Plan for quorum loss before it happens.** Swarm's Raft consensus means losing a majority of managers takes down the control plane. We learned to automate the recovery path inside ``swarm_node_init.sh`` — if a node detects a leaderless cluster, it attempts to recover automatically:
+**Plan for quorum loss before it happens.** Swarm's Raft consensus means losing a majority of managers takes down the control plane. We learned to automate the recovery path inside ``swarm_node_init.sh``. If a node detects a leaderless cluster, it attempts to recover automatically:
 
 .. code-block:: bash
 
@@ -242,15 +233,15 @@ The same principle applies to Fluent Bit, cAdvisor, and the image cleanup servic
             --default-addr-pool 10.100.0.0/16
     fi
 
-Prevention is better — the ASG separation, ``MinHealthyPercentage: 110``, and drain hooks make quorum loss unlikely — but having automated recovery in the node init path means a cluster can heal itself without someone being paged.
+Prevention is better. The ASG separation, ``MinHealthyPercentage: 110``, and drain hooks make quorum loss unlikely. But having automated recovery in the node init path means a cluster can heal itself without someone being paged.
 
-If we could go back, we'd invest in the ``cluster_info.json`` schema earlier. Having a machine-readable description of each cluster's resources made automation dramatically easier -- we just didn't realise how much until we had five clusters to manage.
+**Make your clusters machine-readable from day one.** One of the best decisions we made early was introducing a ``cluster_info.json`` schema for every cluster. Having a machine-readable description of each cluster's resources made automation dramatically easier, and it kept paying dividends as we scaled to seven clusters and beyond.
 
 
 The Dust Settles
 ----------------
 Docker Swarm is not the right choice for everyone. If you're running hundreds of services with complex service mesh requirements, you need Kubernetes. If you're a three-person startup with two containers, you need a PaaS.
 
-But there's a wide band of teams in between -- teams with ten to fifty services, a small platform engineering function, and a strong preference for tools that compose well with what they already know. For those teams, Swarm is worth a serious look. Not because it's trendy (it emphatically is not), but because it's the rare piece of infrastructure software that does exactly what it promises and then gets out of the way.
+But there's a wide band of teams in between, teams with ten to fifty services, a small platform engineering function, and a strong preference for tools that compose well with what they already know. For those teams, Swarm is worth a serious look. Not because it's trendy (it emphatically is not), but because it's the rare piece of infrastructure software that does exactly what it promises and then gets out of the way.
 
-Balance, in production, means your infrastructure is boring enough that you can focus on the product. A well-run swarm doesn't need a beekeeper hovering over it every hour -- it needs the right structure, the right signals, and enough automation that no single person's knowledge is load-bearing. We're not quite there yet -- our alert coverage still has gaps, and a few services could use tighter resource limits. But the workers are doing their thing, and we sleep better than we used to.
+Stability, in production, means your infrastructure is boring enough that you can focus on the product. It requires the right structure, the right signals, and enough automation that no single person's knowledge is load-bearing. We're not quite there yet. Our alert coverage still has gaps, and a few services could use tighter resource limits. But we sleep better than we used to, and that's the only metric that matters.
