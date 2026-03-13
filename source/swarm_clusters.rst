@@ -44,7 +44,7 @@ It worked. Until it didn't scale. Not in the "we need 10x throughput" sense, but
 
 The Elephant in the Room
 ------------------------
-Yes, we picked Docker Swarm. In 2024. We've heard the jokes.
+Yes, we picked Docker Swarm. In 2026. We've heard the jokes.
 
 Here's the thing: Kubernetes is an extraordinary piece of engineering. It is also, for a team our size managing the number of services we run, an extraordinary amount of operational overhead. We didn't need service meshes, custom resource definitions, or a dedicated platform team to manage the orchestrator itself. We needed containers, rolling updates, service discovery, and overlay networking. Swarm gives us all of that with a tool our engineers already know: the Compose file.
 
