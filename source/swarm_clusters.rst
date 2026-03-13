@@ -22,6 +22,7 @@ Our old setup was less "architecture" and more "archaeology." Over the years, we
 **Model 1: Raw code on bare servers.** The core API, our oldest and largest service, ran as raw Python on dedicated EC2 instances. Django behind uWSGI behind Nginx, deployed via GitHub Actions that would SSH into each app server and run a script like this:
 
 .. code-block:: bash
+   :linenos:
 
     cd /opt/projects/app
     git checkout master -f && git pull
@@ -50,6 +51,7 @@ Here's the thing: Kubernetes is an extraordinary piece of engineering. It is als
 A Swarm compose file *is* a Docker Compose file with a ``deploy`` key. There's no new DSL to learn, no Helm charts to template, no YAML-in-YAML to debug at 2am. Our developers write the same ``docker-compose.yml`` they use locally, add deployment constraints and resource limits, and that's the production manifest.
 
 .. code-block:: yaml
+   :linenos:
 
     deploy:
       update_config:
@@ -77,6 +79,7 @@ The migration wasn't a big bang. It was a series of deliberate changes across ne
 The real magic is in the node lifecycle. When an ASG launches or replaces an instance, AWS CodeDeploy runs four lifecycle hooks defined in ``appspec.yml``:
 
 .. code-block:: yaml
+   :linenos:
 
     hooks:
       ApplicationStop:
@@ -97,6 +100,7 @@ The first two hooks handle draining and cleanup. The interesting work is in ``sw
 **One deployment model.** The three old approaches collapsed into a single pattern: ``docker stack deploy`` triggered by GitHub Actions through a reusable workflow called ``cd.stack.yml``. The workflow SSHes into a validated manager node, pulls the compose file and secrets, runs an optional ``prepare.sh`` for migrations or pre-deploy setup, and deploys.
 
 .. code-block:: bash
+   :linenos:
 
     docker stack deploy -c docker-compose.yml \
         --prune --with-registry-auth --detach=false \
@@ -110,6 +114,7 @@ Boring in the Best Way
 Day-to-day, a deployment looks like this: a developer pushes to the relevant branch, a ``repository_dispatch`` event fires, and ``cd.stack.yml`` takes over. First, it picks a responsive manager by probing each known IP on port 2377:
 
 .. code-block:: bash
+   :linenos:
 
     # Manager selection: first reachable manager wins
     for IP in $MANAGER_IPS; do
@@ -122,6 +127,7 @@ Day-to-day, a deployment looks like this: a developer pushes to the relevant bra
 Once a manager is selected, the workflow SSHes in and runs ``docker stack deploy``. Then it watches:
 
 .. code-block:: bash
+   :linenos:
 
     # Post-deploy: 3-minute rollback watch
     MAX_WAIT=180
@@ -144,6 +150,7 @@ Slack gets notified. A GitHub deployment record is created. The developer never 
 Here's what a production service definition actually looks like. A real Compose file from one of our clusters:
 
 .. code-block:: yaml
+   :linenos:
 
     services:
       api_server:
@@ -200,6 +207,7 @@ Observability went from four fragmented systems (self-hosted Elasticsearch for l
 **New Relic** handles APM, infrastructure metrics, host metrics, and container-level visibility. The infrastructure agent is installed on every node during ``swarm_node_init.sh``, and each service integrates APM by wrapping its entrypoint with the New Relic agent in its Dockerfile:
 
 .. code-block:: dockerfile
+   :linenos:
 
     # newrelic package installed via requirements.txt / pyproject.toml
     CMD ["newrelic-admin", "run-program", "uvicorn", "app:application", "--host", "0.0.0.0"]
@@ -226,6 +234,7 @@ The same principle applies to Fluent Bit, cAdvisor, and the image cleanup servic
 **Plan for quorum loss before it happens.** Swarm's Raft consensus means losing a majority of managers takes down the control plane. We learned to automate the recovery path inside ``swarm_node_init.sh``. If a node detects a leaderless cluster, it attempts to recover automatically:
 
 .. code-block:: bash
+   :linenos:
 
     if [[ -n $(docker node ls 2>&1 | grep "The swarm does not have a leader.") ]]; then
         docker swarm init --force-new-cluster \
