@@ -254,3 +254,17 @@ Docker Swarm is not the right choice for everyone. If you're running hundreds of
 But there's a wide band of teams in between, teams with ten to fifty services, a small platform engineering function, and a strong preference for tools that compose well with what they already know. For those teams, Swarm is worth a serious look. Not because it's trendy (it emphatically is not), but because it's the rare piece of infrastructure software that does exactly what it promises and then gets out of the way.
 
 Stability, in production, means your infrastructure is boring enough that you can focus on the product. It requires the right structure, the right signals, and enough automation that no single person's knowledge is load-bearing. We're not quite there yet. Our alert coverage still has gaps, and a few services could use tighter resource limits. But we sleep better than we used to, and that's the only metric that matters.
+
+
+.. _references:
+
+References
+----------
+ 1. `Docker Swarm Mode Overview <https://docs.docker.com/engine/swarm/>`_
+ 2. `Docker Swarm Protocols and Ports <https://docs.docker.com/engine/swarm/swarm-tutorial/#open-protocols-and-ports-between-the-hosts>`_
+ 3. `Recovering from Swarm Quorum Loss <https://docs.docker.com/engine/swarm/admin_guide/#recover-from-losing-the-quorum>`_
+ 4. `Swarm Does Not Refresh Registry Credentials (moby #31063) <https://github.com/moby/moby/issues/31063>`_
+ 5. `Integrating AWS CodeDeploy with EC2 Auto Scaling <https://docs.aws.amazon.com/codedeploy/latest/userguide/integrations-aws-auto-scaling.html>`_
+ 6. `CodeDeploy AppSpec File Reference <https://docs.aws.amazon.com/codedeploy/latest/userguide/reference-appspec-file.html>`_
+ 7. `AWS Public IPv4 Address Charge Announcement <https://aws.amazon.com/blogs/aws/new-aws-public-ipv4-address-charge-public-ip-insights/>`_
+ 8. `New Relic Python Agent: newrelic-admin run-program <https://docs.newrelic.com/docs/apm/agents/python-agent/installation/python-agent-admin-script-advanced-usage/#run-program>`_
