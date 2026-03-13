@@ -8,7 +8,7 @@ From Buzz to Balance: Docker Swarm Orchestration Without Tears
 
 Something Isn't Right Here
 --------------------------
-You know the feeling. You SSH into a production server at 11pm because a deployment failed, and you're greeted by a process you didn't start, on a box you didn't provision, running a version of the code you're not sure anyone intended to ship. You fix it. You go to bed. You do it again next Thursday.
+You know the feeling. You SSH into a production server at 11pm because a deployment failed, and the running config doesn't match what's in the repo. A process was tuned by hand months ago. The environment has drifted in ways no one fully tracks. You patch it. You go to bed. You do it again next Thursday.
 
 That was us. Not in some dramatic, everything-is-on-fire way. More like a slow accumulation of workarounds that had quietly become the system. We had infrastructure that *worked*, technically. But it didn't work the way infrastructure should: predictably, boringly, without someone's personal knowledge of which server does what.
 
