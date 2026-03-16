@@ -1,45 +1,27 @@
 .. toctree::
 
 
-============================================================================
-From Buzz to Balance: Docker Swarm Orchestration Without Tears (Raw Version)
-============================================================================
+=============================================================
+From Buzz to Balance: Docker Swarm Orchestration Without Tears
+=============================================================
 
 
 Something Isn't Right Here
 --------------------------
-You know the feeling. You SSH into a production server at 11pm because a deployment failed, and you're greeted by a process you didn't start, on a box you didn't provision, running a version of the code you're not sure anyone intended to ship. You fix it. You go to bed. You do it again next Thursday.
+You know the feeling. You SSH into a production server at 11pm because a deployment failed, and the running config doesn't match what's in the repo. A process was tuned by hand months ago. The environment has drifted in ways no one fully tracks. You patch it. You go to bed. You do it again next Thursday.
 
 That was us. Not in some dramatic, everything-is-on-fire way. More like a slow accumulation of workarounds that had quietly become the system. We had infrastructure that *worked*, technically. But it didn't work the way infrastructure should: predictably, boringly, without someone's personal knowledge of which server does what.
 
 This is the story of how we moved from that to something we actually trust. Not by chasing the shiniest orchestration tool on the market, but by picking the one that fit: Docker Swarm, and building the automation around it that made the difference.
 
 
-Three Deployment Models Walk Into a VPC
-----------------------------------------
-Our old setup was less "architecture" and more "archaeology." Over the years, we'd accumulated three distinct ways of deploying services, each born from a different era of the platform's growth.
+Where We Started
+-----------------
+Like most growing platforms, our infrastructure had evolved organically. Over time, we'd accumulated multiple ways of deploying services: some ran as raw code on dedicated instances, others as standalone Docker containers, and a few had been loosely grouped into an early Swarm cluster without much structure around it. Each approach had its own deployment scripts, its own conventions, and its own failure modes.
 
-**Model 1: Raw code on bare servers.** The core API, our oldest and largest service, ran as raw Python on dedicated EC2 instances. Django behind uWSGI behind Nginx, deployed via GitHub Actions that would SSH into each app server and run a script like this:
+The setup worked, but it didn't scale in the way that mattered most: operationally. Adding a new service meant choosing which deployment model to follow, and debugging an incident meant knowing which model that particular service used. Observability was fragmented across multiple tools with inconsistent coverage.
 
-.. code-block:: bash
-   :linenos:
-
-    cd /opt/projects/app
-    git checkout master -f && git pull
-    git submodule update --init --remote
-    source venv3.11/bin/activate && poetry install
-    python manage.py migrate && python manage.py collectstatic --no-input
-    kill -HUP $(cat /tmp/app.pid)   # graceful uWSGI reload
-
-Three app servers behind an ELB, one task server running RabbitMQ and Celery workers managed by Supervisor (same git-pull ritual, but ending with ``supervisorctl restart all``). Capacity changes meant provisioning a new instance by hand.
-
-**Model 2: Standalone Docker containers.** Newer microservices ran as Docker containers on a single host: Traefik in front, ``docker-compose up -d`` to deploy. No orchestration, no health checks beyond what Traefik provided, no resource limits.
-
-**Model 3: The accidental Swarm cluster.** Our SOA server started as a Docker Compose host and gradually became an ad-hoc Swarm cluster as we bolted on more services. Less organized colony, more bees in a shoebox. Staging and production workloads shared the same nodes. A misbehaving staging service could, and occasionally did, starve a production one.
-
-All of this ran on **public subnets**. Some instances had public IPv4 addresses. When AWS started charging for public IPv4 addresses in 2024, we were suddenly spending roughly $2,500 a year on public IPs alone, and every microservice node needed an Elastic IP for payment provider whitelisting. Observability was split across a self-hosted Elasticsearch cluster for logs, an Elastic Cloud instance for APM and traces, plus a separate Prometheus and Grafana stack for infrastructure metrics. Coverage was inconsistent. Incidents on the SOA cluster were routinely discovered through customer reports, not alerts.
-
-It worked. Until it didn't scale. Not in the "we need 10x throughput" sense, but in the "we can't onboard another service without someone getting paged" sense.
+We needed a single deployment model, a consistent networking layer, and infrastructure that didn't depend on any one person's knowledge of how a specific server was configured.
 
 
 The Elephant in the Room
@@ -97,7 +79,7 @@ The real magic is in the node lifecycle. When an ASG launches or replaces an ins
 
 The first two hooks handle draining and cleanup. The interesting work is in ``swarm_node_init.sh``: it pulls Swarm join tokens from AWS Secrets Manager, validates which manager IPs are actually reachable, and either joins the existing cluster or initializes a new one if this is the first manager. It labels the node with its availability zone, syncs the updated manager IP list back to Secrets Manager, and logs into ECR. Finally, ``sidecars_init.sh`` deploys shared infrastructure services, but only on the first manager to join the cluster. Subsequent nodes don't need to run it: Swarm automatically schedules global services onto any new node, and replicated services already have their desired replica count filled.
 
-**One deployment model.** The three old approaches collapsed into a single pattern: ``docker stack deploy`` triggered by GitHub Actions through a reusable workflow called ``cd.stack.yml``. The workflow SSHes into a validated manager node, pulls the compose file and secrets, runs an optional ``prepare.sh`` for migrations or pre-deploy setup, and deploys.
+**One deployment model.** Every service now deploys the same way: ``docker stack deploy`` triggered by GitHub Actions through a reusable workflow called ``cd.stack.yml``. The workflow SSHes into a validated manager node, pulls the compose file and secrets, runs an optional ``prepare.sh`` for migrations or pre-deploy setup, and deploys.
 
 .. code-block:: bash
    :linenos:
@@ -202,7 +184,7 @@ The shared sidecars, seven of them, deployed once by ``sidecars_init.sh`` when t
 - **Portainer Edge Agent** (global) connects each node to a central Portainer server for cluster management
 - **cleanup** (global) prunes old Docker images to prevent disk pressure
 
-Observability went from four fragmented systems (self-hosted Elasticsearch for logs, Elastic Cloud for APM and traces, a separate Prometheus/Grafana stack for infrastructure metrics, and MetricBeat for application metrics) to two primary layers.
+We consolidated our previously fragmented observability stack into two primary layers.
 
 **New Relic** handles APM, infrastructure metrics, host metrics, and container-level visibility. The infrastructure agent is installed on every node during ``swarm_node_init.sh``, and each service integrates APM by wrapping its entrypoint with the New Relic agent in its Dockerfile:
 
@@ -227,9 +209,9 @@ Off-the-shelf solutions exist, but the logic is simple enough that we chose to b
 
 The same principle applies to Fluent Bit, cAdvisor, and the image cleanup service. Invest in the boring infrastructure that keeps the cluster healthy, not just the application services that run on it.
 
-**Security improvements often pay for themselves.** Moving to private subnets wasn't just a security win, it eliminated $2,500/year in public IPv4 costs and removed the operational overhead of managing per-node Elastic IPs for payment provider whitelisting. When someone tells you "we can't afford to fix the security posture," run the numbers. You might find it's the insecure setup that's expensive.
+**Security improvements often pay for themselves.** Moving to private subnets wasn't just a security win. It also reduced our cloud spend and removed operational overhead around IP management. When someone tells you "we can't afford to fix the security posture," run the numbers. You might find it's the insecure setup that's expensive.
 
-**Consistency matters more than the orchestrator debate.** Docker Swarm versus Kubernetes is a fun argument at conferences. In practice, the thing that transformed our operations was going from three inconsistent deployment models to one. Swarm made that easy because the tooling was already familiar, but the real win was the consistency itself: a single ``cd.stack.yml`` workflow, a single compose file convention, a single set of sidecars. Consistency compounds.
+**Consistency matters more than the orchestrator debate.** Docker Swarm versus Kubernetes is a fun argument at conferences. In practice, the thing that transformed our operations was having a single deployment model for every service. Swarm made that easy because the tooling was already familiar, but the real win was the consistency itself: a single ``cd.stack.yml`` workflow, a single compose file convention, a single set of sidecars. Consistency compounds.
 
 **Plan for quorum loss before it happens.** Swarm's Raft consensus means losing a majority of managers takes down the control plane. We learned to automate the recovery path inside ``swarm_node_init.sh``. If a node detects a leaderless cluster, it attempts to recover automatically:
 
@@ -266,5 +248,4 @@ References
  4. `Swarm Does Not Refresh Registry Credentials (moby #31063) <https://github.com/moby/moby/issues/31063>`_
  5. `Integrating AWS CodeDeploy with EC2 Auto Scaling <https://docs.aws.amazon.com/codedeploy/latest/userguide/integrations-aws-auto-scaling.html>`_
  6. `CodeDeploy AppSpec File Reference <https://docs.aws.amazon.com/codedeploy/latest/userguide/reference-appspec-file.html>`_
- 7. `AWS Public IPv4 Address Charge Announcement <https://aws.amazon.com/blogs/aws/new-aws-public-ipv4-address-charge-public-ip-insights/>`_
- 8. `New Relic Python Agent: newrelic-admin run-program <https://docs.newrelic.com/docs/apm/agents/python-agent/installation/python-agent-admin-script-advanced-usage/#run-program>`_
+ 7. `New Relic Python Agent: newrelic-admin run-program <https://docs.newrelic.com/docs/apm/agents/python-agent/installation/python-agent-admin-script-advanced-usage/#run-program>`_
