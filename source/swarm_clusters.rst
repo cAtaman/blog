@@ -45,7 +45,7 @@ A Swarm compose file *is* a Docker Compose file with a ``deploy`` key. There's n
         failure_action: pause
         order: stop-first
 
-``start-first`` gives us zero-downtime rolling updates. ``failure_action: rollback`` with a 30-second ``monitor`` window means a bad deploy automatically rolls back, and if the rollback itself fails, it pauses so a human can investigate instead of looping. You'll see the full picture, with placement, resource limits, and networking, in a complete Compose file later. Could Kubernetes do more? Absolutely. Do we need more? Not today.
+``start-first`` gives us zero-downtime rolling updates. ``failure_action: rollback`` with a 30-second ``monitor`` window means a bad deployment automatically rolls back, and if the rollback itself fails, it pauses so a human can investigate instead of looping. You'll see the full picture, with placement, resource limits, and networking, in a complete Compose file later. Could Kubernetes do more? Absolutely. Do we need more? Not today.
 
 We're not ideological about this. The obvious risk is that Docker has largely stopped investing in Swarm; the project receives minimal updates. But for our purposes, that's a feature, not a bug. Swarm is stable *because* it's done. We'd rather run a finished tool than babysit a moving target. If we outgrow it, we'll migrate. But "you might need Kubernetes someday" is not a reason to adopt it now. Not when the operational tax is real and the benefits are theoretical for our workload.
 
